@@ -77,3 +77,7 @@ app.*.map.json
 
 # Environment Variables
 *.env
+
+# Backend generated data (do not commit)
+/backend/tasks.json
+/backend/generated_images/
