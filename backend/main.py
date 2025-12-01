@@ -21,9 +21,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Next Generate App Backend", lifespan=lifespan)
 
 # ---------- 简单请求日志，中间件：记录客户端 IP 和时间 ----------
+# 日志会追加写入 backend/server.log 文件（同时也会打印到控制台）
+log_file_path = os.path.join(os.path.dirname(__file__), "server.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file_path, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("request_logger")
 
