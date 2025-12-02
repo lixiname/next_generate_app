@@ -76,7 +76,7 @@ class SettingsDrawer extends ConsumerWidget {
                           boxShadow: isSelected
                               ? [
                                   BoxShadow(
-                                    color: themeColor.color.withOpacity(0.5),
+                                    color: themeColor.color.withValues(alpha: 0.5),
                                     blurRadius: 8,
                                     spreadRadius: 2,
                                   ),
@@ -176,39 +176,133 @@ class _ServerIpInputState extends ConsumerState<_ServerIpInput> {
 
   Future<void> _saveIp() async {
     final value = _ipController.text.trim();
-    if (value.isNotEmpty) {
-      // 先保存 IP 配置
-      await ref.read(serverIpProvider.notifier).setIp(value);
+    if (value.isEmpty) return;
 
-      // 保存后立即测试一次连接
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('正在测试与服务器的连接...'),
-          duration: Duration(seconds: 1),
+    // 先保存 IP 配置（这会触发 Provider 重建）
+    await ref.read(serverIpProvider.notifier).setIp(value);
+
+    // 显示测试中提示
+    final testSnackBar = ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('正在测试与服务器的连接...')),
+          ],
         ),
-      );
+        duration: Duration(seconds: 10),
+      ),
+    );
 
-      bool ok = false;
-      String message;
-      try {
-        // 使用当前配置的 SdApiService 调用一次后端
-        final api = ref.read(sdApiServiceProvider);
-        await api.ping(); // 简单请求，用来测试连通性
-        ok = true;
-        message = '连接成功：服务器可用';
-      } catch (e) {
-        message = '连接失败：请检查 IP/端口、防火墙 或 服务是否运行';
+    try {
+      // 等待一小段时间，确保 Provider 已重建
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // 使用新的 SdApiService 实例测试连接
+      final api = ref.read(sdApiServiceProvider);
+      final result = await api.ping();
+
+      // 关闭测试中的提示
+      testSnackBar.close();
+
+      // 显示详细结果
+      if (result.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  result.message,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                if (result.detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.detail!,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  result.message,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                if (result.detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.detail!,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                const Text(
+                  '💡 提示：检查 IP/端口、防火墙设置、服务器是否运行',
+                  style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              label: '查看详情',
+              textColor: Colors.white,
+              onPressed: () {
+                // 可以在这里显示一个对话框显示完整错误信息
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('连接诊断信息'),
+                    content: SingleChildScrollView(
+                      child: Text(
+                        '错误：${result.message}\n\n'
+                        '${result.detail ?? "无详细信息"}',
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('关闭'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        );
       }
-
+    } catch (e) {
+      testSnackBar.close();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(message),
-          backgroundColor: ok ? Colors.green : Colors.red,
-          duration: const Duration(seconds: 3),
+          content: Text('测试连接时发生异常: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
         ),
       );
-      FocusScope.of(context).unfocus();
     }
+
+    FocusScope.of(context).unfocus();
   }
 
   @override
