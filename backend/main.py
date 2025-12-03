@@ -71,6 +71,8 @@ class GenerateRequest(BaseModel):
 async def create_task(request: GenerateRequest):
     task_id = str(uuid.uuid4())
     
+    logger.info(f"Creating new task {task_id} with prompt: {request.prompt[:50]}...")
+    
     task = {
         "id": task_id,
         "prompt": request.prompt,
@@ -80,11 +82,32 @@ async def create_task(request: GenerateRequest):
         "imageUrl": None
     }
     
-    db.add_task(task)
+    try:
+        db.add_task(task)
+        logger.info(f"Task {task_id} saved to database")
+    except Exception as e:
+        logger.error(f"Failed to save task {task_id} to database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save task: {str(e)}")
+    
+    # Ensure worker is running before adding task
+    if not worker.is_running or (hasattr(worker, '_worker_task') and worker._worker_task and worker._worker_task.done()):
+        logger.warning(f"Worker not running when task {task_id} created, attempting to restart...")
+        try:
+            await worker.start()
+        except Exception as e:
+            logger.error(f"Failed to start worker: {e}")
+            raise HTTPException(status_code=500, detail=f"Worker is not available: {str(e)}")
     
     # Add to worker queue instead of BackgroundTasks
     # This ensures sequential processing and prevents server overload
-    await worker.add_task(task_id, request.dict())
+    try:
+        await worker.add_task(task_id, request.dict())
+        logger.info(f"Task {task_id} added to worker queue successfully")
+    except Exception as e:
+        logger.error(f"Failed to add task {task_id} to queue: {e}")
+        # Update task status to failed
+        db.update_task(task_id, {"status": "failed", "error": f"Failed to queue task: {str(e)}"})
+        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
     
     return task
 
@@ -98,6 +121,51 @@ async def get_task(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify worker status"""
+    from engine import engine
+    
+    worker_status = {
+        "is_running": worker.is_running,
+        "queue_size": worker.queue.qsize(),
+        "gpu_queue_size": worker.gpu_queue.qsize() if hasattr(worker, 'gpu_queue') else 0,
+        "worker_task_alive": worker._worker_task is not None and not worker._worker_task.done() if hasattr(worker, '_worker_task') else False,
+        "gpu_thread_alive": worker._gpu_thread is not None and worker._gpu_thread.is_alive() if hasattr(worker, '_gpu_thread') else False
+    }
+    
+    model_status = {
+        "is_ready": engine.is_ready(),
+        "is_loading": engine.is_loading(),
+        "error": engine.get_error()
+    }
+    
+    # Check if worker is actually processing
+    if not worker.is_running or (hasattr(worker, '_worker_task') and worker._worker_task and worker._worker_task.done()):
+        logger.warning(f"Worker health check failed: {worker_status}")
+        return {
+            "status": "unhealthy",
+            "worker": worker_status,
+            "model": model_status,
+            "message": "Worker is not running properly"
+        }
+    
+    # Check if GPU thread is alive
+    if hasattr(worker, '_gpu_thread') and (worker._gpu_thread is None or not worker._gpu_thread.is_alive()):
+        logger.warning(f"GPU thread is not running: {worker_status}")
+        return {
+            "status": "unhealthy",
+            "worker": worker_status,
+            "model": model_status,
+            "message": "GPU thread is not running"
+        }
+    
+    return {
+        "status": "healthy",
+        "worker": worker_status,
+        "model": model_status
+    }
 
 if __name__ == "__main__":
     import uvicorn
