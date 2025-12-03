@@ -118,6 +118,95 @@ class SettingsDrawer extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 _ServerIpInput(theme: theme),
+                const SizedBox(height: 16),
+                // 健康检查按钮：调用后端 /health 接口
+                Consumer(
+                  builder: (context, ref, _) {
+                    return ElevatedButton.icon(
+                      icon: const Icon(Icons.favorite, size: 18),
+                      label: const Text('后端健康检查 (/health)'),
+                      onPressed: () async {
+                        // 先给个“正在检查”的提示
+                        final loadingSnackBar = ScaffoldMessenger.of(context)
+                            .showSnackBar(
+                          const SnackBar(
+                            content: Row(
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text('正在请求 /health ...'),
+                                ),
+                              ],
+                            ),
+                            duration: Duration(seconds: 10),
+                          ),
+                        );
+
+                        try {
+                          // 通过 Provider 获取 SdApiService
+                          final api = ref.read(sdApiServiceProvider);
+                          // 这里假设你已经在 SdApiService 中实现了 health() 方法
+                          final result = await api.health();
+
+                          loadingSnackBar.close();
+
+                          if (result.success) {
+                            // 成功时弹出对话框展示详细状态
+                            if (!context.mounted) return;
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('后端健康状态'),
+                                content: SingleChildScrollView(
+                                  child: Text(
+                                    result.data.toString(),
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('关闭'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          } else {
+                            // 失败时用红色 SnackBar 提示
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    Text('健康检查失败：${result.message}'),
+                                backgroundColor: Colors.red,
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          loadingSnackBar.close();
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('健康检查异常：$e'),
+                              backgroundColor: Colors.red,
+                              duration: const Duration(seconds: 5),
+                            ),
+                          );
+                        }
+                      },
+                    );
+                  },
+                ),
               ],
             ),
           ),

@@ -104,6 +104,46 @@ class SdApiService {
     }
   }
 
+  /// 调用后端 /health，查看 worker / GPU / 模型状态
+  Future<({bool success, String message, dynamic data})> health() async {
+    try {
+      final response = await _dio.get(
+        '/health',
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 10),
+          validateStatus: (status) => true,
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        return (
+          success: true,
+          message: '健康检查成功',
+          data: response.data,
+        );
+      } else {
+        return (
+          success: false,
+          message: '健康检查接口返回异常状态码: ${response.statusCode}',
+          data: response.data,
+        );
+      }
+    } on DioException catch (e) {
+      return (
+        success: false,
+        message: _getErrorDescription(e),
+        data: _getErrorDetail(e),
+      );
+    } catch (e) {
+      return (
+        success: false,
+        message: '未知错误: $e',
+        data: null,
+      );
+    }
+  }
+
   /// 处理 DioException 并返回用户友好的错误描述
   String _handleDioError(DioException e, String operation) {
     final description = _getErrorDescription(e);
